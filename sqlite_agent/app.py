@@ -5,20 +5,20 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from tools import search_tool, wiki_tool, save_tool
-
+from db_tool import create_sample_db, sqlite_query_tool
 
 # Ensure GOOGLE_API_KEY is set in your .env file
 # Using a stable model name is a good practice.
 llm = ChatGoogleGenerativeAI(model='gemini-2.5-flash', temperature=0.0)
 
-class ResearchResponse(BaseModel):
-  topic : str
-  summary : str
-  sources : list[str]
-  tools_used : list[str]
+# Initialize the sample database
+create_sample_db()
 
-parser = PydanticOutputParser(pydantic_object=ResearchResponse)
+class DatabaseResponse(BaseModel):
+  result : str
+  tools_used : list[str] # Keep tools_used for consistency, though it will always be sqlite_query_tool
+
+parser = PydanticOutputParser(pydantic_object=DatabaseResponse)
 
 
 prompt = ChatPromptTemplate.from_messages(
@@ -26,9 +26,16 @@ prompt = ChatPromptTemplate.from_messages(
   [
     (
       "system",
-      """You are a research assistant that will help generate a research paper.
-      Always use the provided tools (search, wiki_tool) to gather information. If the user asks to save information, use the `save_text_to_file` tool with the generated `summary` as the `data` argument.
-      Answer the user query and wrap the output in this format and provide no other text\n {format_instructions}
+      """You are a SQLite database query assistant.
+      Your primary function is to execute SQL queries against a SQLite database using the `sqlite_query_tool`.
+      The database has a table named 'users' with columns: 'id', 'name', 'email'.
+      
+      Users will provide queries in the following template: "Query database for: [SQL query]".
+      You MUST extract the SQL query from this template and pass it directly to the `sqlite_query_tool`.
+      For example, if the user says "Query database for: SELECT * FROM users WHERE name = 'Alice'", you should call `sqlite_query_tool("SELECT * FROM users WHERE name = 'Alice'")`.
+      
+      Always answer the user query by providing the result from the `sqlite_query_tool` wrapped in the specified format.
+      Provide no other text outside of the specified format.\n {format_instructions}
       """,
     ),
     
@@ -40,7 +47,7 @@ prompt = ChatPromptTemplate.from_messages(
 ).partial(format_instructions=parser.get_format_instructions())
 
 
-tools = [search_tool, wiki_tool, save_tool]
+tools = [sqlite_query_tool]
 
 agent = create_tool_calling_agent(
   llm = llm,
@@ -50,7 +57,7 @@ agent = create_tool_calling_agent(
 
 agent_executor = AgentExecutor(agent=agent,tools=tools, verbose=True)
 
-query = input("what can i help you reasearch? ")
+query = input("What can I help you with regarding the database? ")
 
 
 raw_response = agent_executor.invoke({"query":query})
@@ -73,4 +80,3 @@ try:
 except Exception as e:
   # Catch any other parsing errors and print the full raw response for inspection.
   print("Error parsing response:", e, "Raw Response -", raw_response)
-
